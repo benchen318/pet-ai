@@ -1,0 +1,269 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>宠安诊 - AI 宠物健康与便便分析助手</title>
+  <!-- 引入 Tailwind CSS 快速构建 ChatGPT 风格 UI -->
+  <script src="https://cdn.tailwindcss.com"></script>
+  <!-- 引入 Lucide 图标库 -->
+  <script src="https://unpkg.com/lucide@latest"></script>
+</head>
+<body class="bg-gray-50 h-screen flex flex-col font-sans text-gray-800">
+
+  <!-- 顶部 Header -->
+  <header class="bg-white border-b border-gray-200 py-3 px-6 flex items-center justify-between sticky top-0 z-10">
+    <div class="flex items-center space-x-3">
+      <div class="w-10 h-10 rounded-full bg-emerald-500 text-white flex items-center justify-center font-bold text-xl shadow-sm">
+        🐾
+      </div>
+      <div>
+        <h1 class="font-bold text-gray-800 text-lg leading-tight">宠安诊 AI</h1>
+        <p class="text-xs text-gray-500">专业宠物便便与健康状态智能分析系统</p>
+      </div>
+    </div>
+    <div class="text-xs bg-emerald-50 text-emerald-700 font-medium px-3 py-1.5 rounded-full border border-emerald-200">
+      ● DeepSeek V4 PRO 驱动
+    </div>
+  </header>
+
+  <!-- 主聊天区域 -->
+  <main id="chat-container" class="flex-1 overflow-y-auto p-4 md:p-6 space-y-6 max-w-4xl mx-auto w-full">
+    <!-- AI 欢迎消息 -->
+    <div class="flex items-start space-x-3">
+      <div class="w-8 h-8 rounded-full bg-emerald-600 text-white flex items-center justify-center text-sm shrink-0">
+        AI
+      </div>
+      <div class="bg-white border border-gray-200 rounded-2xl rounded-tl-none p-4 max-w-xl shadow-sm text-sm leading-relaxed text-gray-700">
+        <p class="font-medium text-gray-900 mb-1">你好！我是你的 24 小时宠物健康随身助手。</p>
+        <p>你可以拍照或上传主子的**便便照片、排泄视频**，并简单描述宠物的精神状态（如：猫咪 2 岁、食欲正常、呕吐等）。我会从形态、颜色、可能原因及护理建议为你进行初步评估！</p>
+        <div class="mt-3 pt-3 border-t border-gray-100 text-xs text-gray-400">
+          ⚠️ 注意：AI 诊断仅供参考，若宠物出现严重血便、剧烈呕吐或极度萎靡，请尽快就医。
+        </div>
+      </div>
+    </div>
+  </main>
+
+  <!-- 底部输入栏固定区域 -->
+  <footer class="bg-white border-t border-gray-200 p-4 sticky bottom-0">
+    <div class="max-w-4xl mx-auto">
+      <!-- 媒体文件预览区 (默认隐藏) -->
+      <div id="media-preview-bar" class="hidden mb-3 flex flex-wrap gap-3 bg-gray-50 p-2.5 rounded-xl border border-gray-200"></div>
+
+      <!-- 输入表单 -->
+      <form id="chat-form" class="flex items-end space-x-2 bg-gray-100 rounded-2xl p-2 border border-transparent focus-within:border-emerald-500 focus-within:bg-white transition-all">
+        <!-- 隐藏的 File Input，支持图片和视频 -->
+        <input type="file" id="file-input" accept="image/*,video/*" multiple class="hidden" />
+
+        <!-- 附件上传按钮 -->
+        <button type="button" id="upload-btn" title="上传图片或视频" class="p-2.5 text-gray-500 hover:text-emerald-600 hover:bg-gray-200 rounded-xl transition">
+          <i data-lucide="paperclip" class="w-5 h-5"></i>
+        </button>
+
+        <!-- 文字输入框 -->
+        <textarea id="user-input" rows="1" placeholder="描述宠物的症状、年龄、饮食情况..." class="flex-1 bg-transparent border-0 focus:ring-0 text-sm p-2 resize-none max-h-32 focus:outline-none text-gray-800"></textarea>
+
+        <!-- 发送按钮 -->
+        <button type="submit" id="send-btn" class="p-2.5 bg-emerald-600 hover:bg-emerald-700 text-white rounded-xl transition disabled:opacity-50 disabled:cursor-not-allowed">
+          <i data-lucide="send" class="w-5 h-5"></i>
+        </button>
+      </form>
+    </div>
+  </footer>
+
+  <script>
+    // 初始化 Lucide 图标
+    lucide.createIcons();
+
+    const chatContainer = document.getElementById('chat-container');
+    const chatForm = document.getElementById('chat-form');
+    const userInput = document.getElementById('user-input');
+    const fileInput = document.getElementById('file-input');
+    const uploadBtn = document.getElementById('upload-btn');
+    const mediaPreviewBar = document.getElementById('media-preview-bar');
+
+    // 暂存已选择的附件 (Base64 / Data)
+    let selectedFiles = [];
+
+    // 自动变高 TextArea
+    userInput.addEventListener('input', () => {
+      userInput.style.height = 'auto';
+      userInput.style.height = `${Math.min(userInput.scrollHeight, 120)}px`;
+    });
+
+    // 触发文件选择
+    uploadBtn.addEventListener('click', () => fileInput.click());
+
+    // 处理文件选择逻辑
+    fileInput.addEventListener('change', async (e) => {
+      const files = Array.from(e.target.files);
+      for (const file of files) {
+        if (file.type.startsWith('image/')) {
+          const reader = new FileReader();
+          reader.onload = (event) => {
+            addFileToPreview({ type: 'image', url: event.target.result, file });
+          };
+          reader.readAsDataURL(file);
+        } else if (file.type.startsWith('video/')) {
+          // 如果是视频，自动抽取关键帧作为预览图
+          const frameUrl = await extractVideoFrame(file);
+          addFileToPreview({ type: 'video', url: frameUrl, file });
+        }
+      }
+      fileInput.value = ''; // 清空选择器
+    });
+
+    // 将选中的文件显示到预览区
+    function addFileToPreview(fileObj) {
+      selectedFiles.push(fileObj);
+      renderPreviewBar();
+    }
+
+    function removeFile(index) {
+      selectedFiles.splice(index, 1);
+      renderPreviewBar();
+    }
+
+    function renderPreviewBar() {
+      if (selectedFiles.length === 0) {
+        mediaPreviewBar.classList.add('hidden');
+        mediaPreviewBar.innerHTML = '';
+        return;
+      }
+
+      mediaPreviewBar.classList.remove('hidden');
+      mediaPreviewBar.innerHTML = selectedFiles.map((item, idx) => `
+        <div class="relative w-16 h-16 rounded-lg overflow-hidden border border-gray-300 group shadow-xs bg-black">
+          <img src="${item.url}" class="w-full h-full object-cover opacity-90" />
+          ${item.type === 'video' ? '<span class="absolute bottom-1 left-1 text-[10px] bg-black/70 text-white px-1 rounded">视频帧</span>' : ''}
+          <button onclick="removeFile(${idx})" type="button" class="absolute top-1 right-1 bg-black/60 hover:bg-red-600 text-white rounded-full p-0.5 transition">
+            <i data-lucide="x" class="w-3 h-3"></i>
+          </button>
+        </div>
+      `).join('');
+      lucide.createIcons();
+    }
+
+    // HTML5 Canvas 前端抽取视频关键帧逻辑
+    function extractVideoFrame(file) {
+      return new Promise((resolve) => {
+        const video = document.createElement('video');
+        video.preload = 'metadata';
+        video.src = URL.createObjectURL(file);
+        video.currentTime = 1; // 截取第 1 秒画面
+
+        video.onloadeddata = () => {
+          const canvas = document.createElement('canvas');
+          canvas.width = video.videoWidth || 320;
+          canvas.height = video.videoHeight || 240;
+          const ctx = canvas.getContext('2d');
+          ctx.drawImage(video, 0, 0, canvas.width, canvas.height);
+          const dataUrl = canvas.toDataURL('image/jpeg');
+          URL.revokeObjectURL(video.src);
+          resolve(dataUrl);
+        };
+      });
+    }
+
+    // 表单提交发送消息
+    chatForm.addEventListener('submit', (e) => {
+      e.preventDefault();
+      const text = userInput.value.trim();
+      if (!text && selectedFiles.length === 0) return;
+
+      // 渲染用户发送的消息
+      renderUserMessage(text, selectedFiles);
+
+      // 清空输入区
+      userInput.value = '';
+      userInput.style.height = 'auto';
+      const currentFiles = [...selectedFiles];
+      selectedFiles = [];
+      renderPreviewBar();
+
+      // 调用真实后端请求 DeepSeek 诊断
+      simulateAiResponse(text, currentFiles);
+    });
+
+    function renderUserMessage(text, files) {
+      const msgDiv = document.createElement('div');
+      msgDiv.className = 'flex items-start justify-end space-x-3';
+      
+      let mediaHtml = '';
+      if (files.length > 0) {
+        mediaHtml = `<div class="flex flex-wrap gap-2 mb-2">` + 
+          files.map(f => `<img src="${f.url}" class="w-32 h-32 object-cover rounded-lg border border-emerald-300" />`).join('') +
+          `</div>`;
+      }
+
+      msgDiv.innerHTML = `
+        <div class="bg-emerald-600 text-white rounded-2xl rounded-tr-none p-4 max-w-xl shadow-sm text-sm leading-relaxed">
+          ${mediaHtml}
+          ${text ? `<p>${escapeHtml(text)}</p>` : ''}
+        </div>
+        <div class="w-8 h-8 rounded-full bg-gray-300 text-gray-700 flex items-center justify-center text-xs font-bold shrink-0">
+          我
+        </div>
+      `;
+      chatContainer.appendChild(msgDiv);
+      scrollToBottom();
+    }
+
+    // 真实后端请求逻辑
+    async function simulateAiResponse(text, files) {
+      const loadingDiv = document.createElement('div');
+      loadingDiv.className = 'flex items-start space-x-3';
+      loadingDiv.innerHTML = `
+        <div class="w-8 h-8 rounded-full bg-emerald-600 text-white flex items-center justify-center text-sm shrink-0">AI</div>
+        <div class="bg-white border border-gray-200 rounded-2xl rounded-tl-none p-4 shadow-sm text-sm text-gray-500 animate-pulse">
+          🤖 AI 兽医正在分析上传的图像与描述，请稍候...
+        </div>
+      `;
+      chatContainer.appendChild(loadingDiv);
+      scrollToBottom();
+
+      try {
+        const imageList = files.map(f => f.url);
+        const res = await fetch('/api/analyze', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ text: text, images: imageList })
+        });
+
+        const data = await res.json();
+        loadingDiv.remove();
+
+        if (data.success) {
+          renderAiResponse(data.result);
+        } else {
+          renderAiResponse(`⚠️ 分析失败：${data.error}`);
+        }
+      } catch (err) {
+        loadingDiv.remove();
+        renderAiResponse('⚠️ 网络连接异常，请检查后端服务是否正常运行。');
+      }
+    }
+
+    function renderAiResponse(content) {
+      const responseDiv = document.createElement('div');
+      responseDiv.className = 'flex items-start space-x-3';
+      responseDiv.innerHTML = `
+        <div class="w-8 h-8 rounded-full bg-emerald-600 text-white flex items-center justify-center text-sm shrink-0">AI</div>
+        <div class="bg-white border border-gray-200 rounded-2xl rounded-tl-none p-4 max-w-xl shadow-sm text-sm leading-relaxed text-gray-800 whitespace-pre-wrap">
+          ${escapeHtml(content)}
+        </div>
+      `;
+      chatContainer.appendChild(responseDiv);
+      scrollToBottom();
+    }
+
+    function scrollToBottom() {
+      chatContainer.scrollTop = chatContainer.scrollHeight;
+    }
+
+    function escapeHtml(str) {
+      return str.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
+    }
+  </script>
+</body>
+</html>
